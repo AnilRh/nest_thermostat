@@ -18,7 +18,8 @@ module NestThermostat
       self.temperature_scale = config[:temperature_scale] || config[:temp_scale] || :fahrenheit
       @login_url  = config[:login_url] || 'https://home.nest.com/user/login'
       @user_agent = config[:user_agent] ||'Nest/1.1.0.10 CFNetwork/548.0.4'
-
+      @max_cache_duration = config[:max_cache_duration] || 0
+      
       # Login and get token, user_id and URLs
       perform_login(config[:email], config[:password])
 
@@ -42,12 +43,30 @@ module NestThermostat
     end
 
     def status
+      cached_status || refresh_status
+    end
+
+    def cached_status
+      @cached_status_info[:status] if use_cached_status?
+    end
+
+    def clear_status_cache
+      @cached_status_info = nil      
+    end
+    
+    def use_cached_status?
+      @cached_status_info &&
+        (Time.now - @cached_status_info[:created_at]) < @max_cache_duration
+    end
+    
+    def refresh_status
       request = HTTParty.get("#{self.transport_url}/v2/mobile/user.#{self.user_id}", headers: self.headers) rescue nil
       result = JSON.parse(request.body) rescue nil
 
       self.structure_id = result['user'][user_id]['structures'][0].split('.')[1]
       self.device_id    = result['structure'][structure_id]['devices'][0].split('.')[1]
 
+      @cached_status_info = { created_at: Time.now, status: result }
       result
     end
 
@@ -85,7 +104,8 @@ module NestThermostat
 
     def temperature=(degrees)
       degrees = convert_temp_for_set(degrees)
-
+      clear_status_cache
+      
       request = HTTParty.post(
         "#{self.transport_url}/v2/put/shared.#{self.device_id}",
         body: %Q({"target_change_pending":true,"target_temperature":#{degrees}}),
@@ -96,7 +116,8 @@ module NestThermostat
 
     def temperature_low=(degrees)
       degrees = convert_temp_for_set(degrees)
-
+      clear_status_cache
+      
       request = HTTParty.post(
           "#{self.transport_url}/v2/put/shared.#{self.device_id}",
           body: %Q({"target_change_pending":true,"target_temperature_low":#{degrees}}),
@@ -107,7 +128,8 @@ module NestThermostat
 
     def temperature_high=(degrees)
       degrees = convert_temp_for_set(degrees)
-
+      clear_status_cache
+      
       request = HTTParty.post(
           "#{self.transport_url}/v2/put/shared.#{self.device_id}",
           body: %Q({"target_change_pending":true,"target_temperature_high":#{degrees}}),
@@ -127,6 +149,8 @@ module NestThermostat
     end
 
     def away=(state)
+      clear_status_cache
+      
       request = HTTParty.post(
         "#{self.transport_url}/v2/put/structure.#{self.structure_id}",
         body: %Q({"away_timestamp":#{Time.now.to_i},"away":#{!!state},"away_setter":0}),
@@ -148,6 +172,8 @@ module NestThermostat
     end
 
     def fan_mode=(state)
+      clear_status_cache
+      
       HTTParty.post(
         "#{self.transport_url}/v2/put/device.#{self.device_id}",
         body: %Q({"fan_mode":"#{state}"}),
@@ -168,6 +194,8 @@ module NestThermostat
     private
 
     def perform_login(email, password)
+      clear_status_cache
+      
       login_request = HTTParty.post(
                         self.login_url,
                         body:    { username: email, password: password },

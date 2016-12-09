@@ -40,6 +40,10 @@ puts nest.leaf                  # => true # May take a few seconds after a temp 
 puts nest.humidity              # => 54 # Relative humidity in percent
 ```
 
+Get cache status so multiple calls are faster:
+```ruby
+nest = NestThermostat::Nest.new(email: ENV['NEST_EMAIL'], password: ENV['NEST_PASS'], max_cache_duration: 30)
+
 Change the temperature or away status:
 ```ruby
 puts nest.temperature # => 73.0
